@@ -23,6 +23,7 @@
 #include "sway/desktop/transaction.h"
 #include "sway/desktop/idle_inhibit_v1.h"
 #include "sway/desktop/launcher.h"
+#include "sway/icon.h"
 #include "sway/input/cursor.h"
 #include "sway/ipc-server.h"
 #include "sway/output.h"
@@ -134,6 +135,9 @@ void view_destroy(struct sway_view *view) {
 	list_free(view->executed_criteria);
 
 	view_assign_ctx(view, NULL);
+	free(view->client_icon_name);
+	sway_icon_unref(view->client_icon);
+	sway_icon_unref(view->icon);
 	wlr_scene_node_destroy(&view->image_capture_scene->tree.node);
 	wlr_scene_node_destroy(&view->scene_tree->node);
 	if (view->impl->destroy) {
@@ -818,6 +822,8 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 	view->surface = wlr_surface;
 	view_populate_pid(view);
 	view->container = container_create(view);
+	// The app_id or class may have changed while the view was unmapped
+	view->icon_resolved = false;
 
 	if (view->ctx == NULL) {
 		struct launcher_ctx *ctx = launcher_ctx_find_pid(view->pid);
@@ -1099,6 +1105,66 @@ void view_update_app_id(struct sway_view *view) {
 
 	if (view->ext_foreign_toplevel) {
 		update_ext_foreign_toplevel(view);
+	}
+
+	view_update_icon(view);
+}
+
+static struct sway_icon *view_resolve_icon(struct sway_view *view) {
+	if (view->impl->fetch_client_icon) {
+		view->impl->fetch_client_icon(view);
+	}
+
+	// An icon set by the client takes precedence; an icon name over pixel data
+	struct sway_icon *icon = NULL;
+	if (view->client_icon_name) {
+		icon = sway_icon_from_name(view->client_icon_name);
+	}
+	if (!icon && view->client_icon) {
+		icon = sway_icon_ref(view->client_icon);
+	}
+
+	// Otherwise, use the icon of the application
+	const char *app_ids[] = {
+		view_get_sandbox_app_id(view),
+		view_get_app_id(view),
+		view_get_class(view),
+		view_get_instance(view),
+	};
+	for (size_t i = 0; !icon && i < sizeof(app_ids) / sizeof(app_ids[0]); ++i) {
+		icon = sway_icon_for_app(app_ids[i]);
+	}
+	return icon;
+}
+
+struct sway_icon *view_get_icon(struct sway_view *view) {
+	if (!view->icon_resolved && view->surface) {
+		struct sway_icon *icon = view_resolve_icon(view);
+		sway_icon_unref(view->icon);
+		view->icon = icon;
+		view->icon_resolved = true;
+	}
+	return view->icon;
+}
+
+void view_set_client_icon(struct sway_view *view, const char *name,
+		list_t *images) {
+	free(view->client_icon_name);
+	view->client_icon_name = name ? strdup(name) : NULL;
+
+	sway_icon_unref(view->client_icon);
+	view->client_icon = NULL;
+	if (images && images->length > 0) {
+		view->client_icon = sway_icon_from_images(images);
+	} else if (images) {
+		list_free(images);
+	}
+}
+
+void view_update_icon(struct sway_view *view) {
+	view->icon_resolved = false;
+	if (view->container && view->container->title_window_icon) {
+		container_arrange_title_bar(view->container);
 	}
 }
 

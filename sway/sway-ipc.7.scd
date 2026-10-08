@@ -385,6 +385,11 @@ node and will have the following properties:
 |- scratchpad_state
 :  string
 :  Whether the window is in the scratchpad. Can be either "none" or "fresh"
+|- window_icon_padding
+:  integer
+:  (Only containers and windows) The padding around the window icon in the
+   title bar (see *title_window_icon* in *sway*(5)), or -1 if the icon is
+   not shown
 |- app_id
 :  string
 :  (Only windows) For an xdg-shell window, the name of the application, if set.

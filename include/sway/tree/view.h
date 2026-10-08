@@ -13,6 +13,8 @@
 #include "sway/input/seat.h"
 
 struct sway_container;
+struct sway_icon;
+struct wlr_xdg_toplevel_icon_v1;
 struct sway_xdg_decoration;
 
 enum sway_view_type {
@@ -60,6 +62,8 @@ struct sway_view_impl {
 	void (*close)(struct sway_view *view);
 	void (*close_popups)(struct sway_view *view);
 	void (*destroy)(struct sway_view *view);
+	// Updates client_icon_name and client_icon, if they're out of date
+	void (*fetch_client_icon)(struct sway_view *view);
 };
 
 struct sway_view {
@@ -126,6 +130,14 @@ struct sway_view {
 
 	enum sway_view_tearing_mode tearing_mode;
 	enum wp_tearing_control_v1_presentation_hint tearing_hint;
+
+	// The icon set by the client, via xdg-toplevel-icon-v1 or _NET_WM_ICON
+	char *client_icon_name;
+	struct sway_icon *client_icon;
+
+	// The icon shown in the title bar, looked up when needed: see view_get_icon
+	struct sway_icon *icon;
+	bool icon_resolved;
 };
 
 struct sway_xdg_shell_view {
@@ -133,6 +145,10 @@ struct sway_xdg_shell_view {
 
 	struct wlr_scene_tree *image_capture_tree;
 	char *tag;
+
+	// The icon set with xdg-toplevel-icon-v1, until it's read: see view_get_icon
+	struct wlr_xdg_toplevel_icon_v1 *pending_icon;
+	bool icon_outdated;
 
 	struct wl_listener commit;
 	struct wl_listener request_move;
@@ -169,6 +185,7 @@ struct sway_xwayland_view {
 	struct wl_listener set_window_type;
 	struct wl_listener set_hints;
 	struct wl_listener set_decorations;
+	struct wl_listener set_icon;
 	struct wl_listener associate;
 	struct wl_listener dissociate;
 	struct wl_listener map;
@@ -177,6 +194,8 @@ struct sway_xwayland_view {
 	struct wl_listener override_redirect;
 
 	struct wl_listener surface_tree_destroy;
+
+	bool icon_outdated; // _NET_WM_ICON needs to be fetched again
 };
 
 struct sway_xwayland_unmanaged {
@@ -333,6 +352,25 @@ struct sway_view *view_from_wlr_surface(struct wlr_surface *surface);
 void view_update_app_id(struct sway_view *view);
 
 /**
+ * Returns the icon to show in the view's title bar, or NULL if there is none.
+ * The icon is looked up when it's first needed after it may have changed.
+ */
+struct sway_icon *view_get_icon(struct sway_view *view);
+
+/**
+ * Sets the icon provided by the client: an icon name and images of different
+ * sizes, taking ownership of the list of cairo surfaces. Both may be NULL.
+ * Call view_update_icon() afterwards.
+ */
+void view_set_client_icon(struct sway_view *view, const char *name,
+	list_t *images);
+
+/**
+ * Marks the view's icon as possibly changed, and updates the title bar.
+ */
+void view_update_icon(struct sway_view *view);
+
+/**
  * Re-read the view's title property and update any relevant title bars.
  * The force argument makes it recreate the title bars even if the title hasn't
  * changed.
@@ -368,5 +406,7 @@ void view_send_frame_done(struct sway_view *view);
 bool view_can_tear(struct sway_view *view);
 
 void xdg_toplevel_tag_manager_v1_handle_set_tag(struct wl_listener *listener, void *data);
+
+void xdg_toplevel_icon_manager_v1_handle_set_icon(struct wl_listener *listener, void *data);
 
 #endif

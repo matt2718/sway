@@ -1,4 +1,7 @@
+#include <cairo.h>
 #include <float.h>
+#include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <wayland-server-core.h>
@@ -10,6 +13,7 @@
 #include <xcb/xcb_icccm.h>
 #include "log.h"
 #include "sway/desktop/transaction.h"
+#include "sway/icon.h"
 #include "sway/input/cursor.h"
 #include "sway/input/input-manager.h"
 #include "sway/input/seat.h"
@@ -398,6 +402,84 @@ static void get_constraints(struct sway_view *view, double *min_width,
 	*max_height = size_hints->max_height > 0 ? size_hints->max_height : DBL_MAX;
 }
 
+static cairo_surface_t *image_from_net_wm_icon(uint32_t width, uint32_t height,
+		const uint32_t *data) {
+	if (width == 0 || height == 0 || width > 1024 || height > 1024) {
+		return NULL;
+	}
+	cairo_surface_t *image =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	if (cairo_surface_status(image) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(image);
+		return NULL;
+	}
+
+	// _NET_WM_ICON pixels are ARGB, without premultiplied alpha
+	cairo_surface_flush(image);
+	unsigned char *dst = cairo_image_surface_get_data(image);
+	int stride = cairo_image_surface_get_stride(image);
+	for (uint32_t y = 0; y < height; ++y) {
+		uint32_t *row = (uint32_t *)(dst + y * stride);
+		for (uint32_t x = 0; x < width; ++x) {
+			uint32_t pixel = data[y * width + x];
+			uint32_t a = pixel >> 24;
+			uint32_t r = (((pixel >> 16) & 0xff) * a + 127) / 255;
+			uint32_t g = (((pixel >> 8) & 0xff) * a + 127) / 255;
+			uint32_t b = ((pixel & 0xff) * a + 127) / 255;
+			row[x] = a << 24 | r << 16 | g << 8 | b;
+		}
+	}
+	cairo_surface_mark_dirty(image);
+	return image;
+}
+
+static void fetch_client_icon(struct sway_view *view) {
+	struct sway_xwayland_view *xwayland_view = xwayland_view_from_view(view);
+	struct wlr_xwayland_surface *xsurface = view->wlr_xwayland_surface;
+	if (!xwayland_view || !xwayland_view->icon_outdated || !xsurface) {
+		return;
+	}
+	xwayland_view->icon_outdated = false;
+
+	list_t *images = create_list();
+	xcb_ewmh_get_wm_icon_reply_t reply;
+	if (wlr_xwayland_surface_fetch_icon(xsurface, &reply)) {
+		// Choose which images to keep
+		int sizes[256];
+		bool keep[256];
+		size_t n = 0;
+		xcb_ewmh_wm_icon_iterator_t iter = xcb_ewmh_get_wm_icon_iterator(&reply);
+		for (; iter.rem > 0 && n < sizeof(sizes) / sizeof(sizes[0]);
+				xcb_ewmh_get_wm_icon_next(&iter)) {
+			uint32_t size = iter.width > iter.height ? iter.width : iter.height;
+			sizes[n++] = size > INT_MAX ? 0 : (int)size;
+		}
+		sway_icon_choose_images(sizes, n, keep);
+
+		iter = xcb_ewmh_get_wm_icon_iterator(&reply);
+		for (size_t i = 0; iter.rem > 0 && i < n;
+				++i, xcb_ewmh_get_wm_icon_next(&iter)) {
+			if (!keep[i]) {
+				continue;
+			}
+			cairo_surface_t *image =
+				image_from_net_wm_icon(iter.width, iter.height, iter.data);
+			if (image) {
+				cairo_surface_t *copy = sway_icon_copy_image(image);
+				cairo_surface_destroy(image);
+				if (copy) {
+					list_add(images, copy);
+				}
+			}
+		}
+		xcb_ewmh_get_wm_icon_reply_wipe(&reply);
+	}
+
+	sway_log(SWAY_DEBUG, "Fetched %d icons for X11 window 0x%"PRIx32,
+		images->length, xsurface->window_id);
+	view_set_client_icon(view, NULL, images);
+}
+
 static const struct sway_view_impl view_impl = {
 	.get_constraints = get_constraints,
 	.get_string_prop = get_string_prop,
@@ -410,6 +492,7 @@ static const struct sway_view_impl view_impl = {
 	.is_transient_for = is_transient_for,
 	.close = _close,
 	.destroy = destroy,
+	.fetch_client_icon = fetch_client_icon,
 };
 
 static void handle_commit(struct wl_listener *listener, void *data) {
@@ -479,6 +562,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	wl_list_remove(&xwayland_view->set_window_type.link);
 	wl_list_remove(&xwayland_view->set_hints.link);
 	wl_list_remove(&xwayland_view->set_decorations.link);
+	wl_list_remove(&xwayland_view->set_icon.link);
 	wl_list_remove(&xwayland_view->associate.link);
 	wl_list_remove(&xwayland_view->dissociate.link);
 	wl_list_remove(&xwayland_view->override_redirect.link);
@@ -700,8 +784,17 @@ static void handle_set_class(struct wl_listener *listener, void *data) {
 	if (xsurface->surface == NULL || !xsurface->surface->mapped) {
 		return;
 	}
+	view_update_icon(view);
 	view_execute_criteria(view);
 	transaction_commit_dirty();
+}
+
+static void handle_set_icon(struct wl_listener *listener, void *data) {
+	struct sway_xwayland_view *xwayland_view =
+		wl_container_of(listener, xwayland_view, set_icon);
+	// Fetching the icon requires a roundtrip, so only do it when it's needed
+	xwayland_view->icon_outdated = true;
+	view_update_icon(&xwayland_view->view);
 }
 
 static void handle_set_role(struct wl_listener *listener, void *data) {
@@ -862,6 +955,10 @@ struct sway_xwayland_view *create_xwayland_view(struct wlr_xwayland_surface *xsu
 	wl_signal_add(&xsurface->events.set_decorations,
 			&xwayland_view->set_decorations);
 	xwayland_view->set_decorations.notify = handle_set_decorations;
+
+	wl_signal_add(&xsurface->events.set_icon, &xwayland_view->set_icon);
+	xwayland_view->set_icon.notify = handle_set_icon;
+	xwayland_view->icon_outdated = true;
 
 	wl_signal_add(&xsurface->events.associate, &xwayland_view->associate);
 	xwayland_view->associate.notify = handle_associate;

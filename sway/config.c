@@ -16,6 +16,7 @@
 #include <strings.h>
 #include <linux/input-event-codes.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_xdg_toplevel_icon_v1.h>
 #include "sway/input/input-manager.h"
 #include "sway/input/seat.h"
 #include "sway/input/switch.h"
@@ -174,6 +175,7 @@ void free_config(struct sway_config *config) {
 	free(config->floating_scroll_left_cmd);
 	free(config->floating_scroll_right_cmd);
 	free(config->font);
+	free(config->title_window_icon_theme);
 	free(config->swaybg_command);
 	free(config->swaynag_command);
 	free((char *)config->current_config_path);
@@ -955,6 +957,13 @@ void config_update_font_height(void) {
 
 	if (config->font_height != prev_max_height) {
 		arrange_root();
+
+		// Window icons are shown in title bars, at the height of the font
+		if (server.xdg_toplevel_icon_manager_v1) {
+			int size = config->font_height;
+			wlr_xdg_toplevel_icon_manager_v1_set_sizes(
+				server.xdg_toplevel_icon_manager_v1, &size, 1);
+		}
 	}
 }
 

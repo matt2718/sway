@@ -524,6 +524,7 @@ struct sway_config {
 	int titlebar_border_thickness;
 	int titlebar_h_padding;
 	int titlebar_v_padding;
+	char *title_window_icon_theme; // NULL to only use the hicolor theme
 	size_t urgent_timeout;
 	enum sway_fowa focus_on_window_activation;
 	enum sway_popup_during_fullscreen popup_during_fullscreen;

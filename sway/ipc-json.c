@@ -741,6 +741,11 @@ static void ipc_json_describe_container(struct sway_container *c, json_object *o
 	json_object_object_add(object, "scratchpad_state",
 			json_object_new_string(!c->scratchpad ? "none" : "fresh"));
 
+	// Same as i3: -1 if the icon isn't shown
+	json_object_object_add(object, "window_icon_padding",
+			json_object_new_int(c->title_window_icon ?
+				c->title_window_icon_padding : -1));
+
 	struct sway_node *parent = node_get_parent(&c->node);
 	struct wlr_box parent_box = {0, 0, 0, 0};
 

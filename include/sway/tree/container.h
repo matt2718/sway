@@ -79,6 +79,7 @@ struct sway_container {
 
 		struct sway_text_node *title_text;
 		struct sway_text_node *marks_text;
+		struct sway_icon_node *icon;
 	} title_bar;
 
 	struct {
@@ -100,6 +101,11 @@ struct sway_container {
 	int title_width;
 
 	char *title_format;
+
+	// Whether to show the view's icon in the title bar, and the horizontal
+	// padding around it
+	bool title_window_icon;
+	int title_window_icon_padding;
 
 	enum sway_container_layout prev_split_layout;
 

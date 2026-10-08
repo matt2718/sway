@@ -13,6 +13,7 @@
 #include "sway/input/seat.h"
 #include "sway/ipc-server.h"
 #include "sway/scene_descriptor.h"
+#include "sway/sway_icon_node.h"
 #include "sway/sway_text_node.h"
 #include "sway/output.h"
 #include "sway/server.h"
@@ -56,6 +57,7 @@ struct sway_container *container_create(struct sway_view *view) {
 	//   - title bar
 	//     - border
 	//     - background
+	//     - icon
 	//     - title text
 	//     - marks text
 	//   - border
@@ -283,6 +285,39 @@ static void update_rect_list(struct wlr_scene_tree *tree, pixman_region32_t *reg
 	}
 }
 
+static struct sway_icon *container_get_title_icon(struct sway_container *con) {
+	if (!con->view || !con->title_window_icon) {
+		return NULL;
+	}
+	return view_get_icon(con->view);
+}
+
+static void container_update_title_icon(struct sway_container *con,
+		struct sway_icon *icon, int x, int y, int size) {
+	if (!icon) {
+		if (con->title_bar.icon) {
+			wlr_scene_node_destroy(con->title_bar.icon->node);
+			con->title_bar.icon = NULL;
+		}
+		return;
+	}
+
+	if (!con->title_bar.icon) {
+		con->title_bar.icon =
+			sway_icon_node_create(con->title_bar.tree, icon, size);
+		if (!con->title_bar.icon) {
+			return;
+		}
+		// The icon goes over the background, but below the text
+		wlr_scene_node_place_above(con->title_bar.icon->node,
+			&con->title_bar.background->node);
+	} else {
+		sway_icon_node_set_icon(con->title_bar.icon, icon);
+		sway_icon_node_set_size(con->title_bar.icon, size);
+	}
+	wlr_scene_node_set_position(con->title_bar.icon->node, x, y);
+}
+
 void container_arrange_title_bar(struct sway_container *con) {
 	enum alignment title_align = config->title_align;
 	int marks_buffer_width = 0;
@@ -291,6 +326,19 @@ void container_arrange_title_bar(struct sway_container *con) {
 
 	pixman_region32_t text_area;
 	pixman_region32_init(&text_area);
+
+	// The window icon goes next to the title, with its padding on both sides,
+	// and the title bar padding between it and the title
+	struct sway_icon *icon = container_get_title_icon(con);
+	int icon_size = config->font_height;
+	int icon_padding = con->title_window_icon_padding;
+	int icon_width = 0;
+	if (icon && icon_size > 0 && icon_size + 2 * icon_padding <=
+			width - 2 * config->titlebar_h_padding) {
+		icon_width = icon_size + 2 * icon_padding + config->titlebar_h_padding;
+	} else {
+		icon = NULL;
+	}
 
 	if (con->title_bar.marks_text) {
 		struct sway_text_node *node = con->title_bar.marks_text;
@@ -303,10 +351,14 @@ void container_arrange_title_bar(struct sway_container *con) {
 			h_padding = width - config->titlebar_h_padding - marks_buffer_width;
 		}
 
-		h_padding = MAX(h_padding, config->titlebar_h_padding);
+		// When space is short, marks can cover the title, but not the icon
+		// (which is on the left unless the title is right-aligned)
+		int icon_left = title_align == ALIGN_RIGHT ? 0 : icon_width;
+		int icon_right = title_align == ALIGN_RIGHT ? icon_width : 0;
+		h_padding = MAX(h_padding, config->titlebar_h_padding + icon_left);
 
 		int alloc_width = MIN((int)node->width,
-			width - h_padding - config->titlebar_h_padding);
+			width - h_padding - config->titlebar_h_padding - icon_right);
 		alloc_width = MAX(alloc_width, 0);
 
 		sway_text_node_set_max_width(node, alloc_width);
@@ -317,22 +369,37 @@ void container_arrange_title_bar(struct sway_container *con) {
 			node->node->x, node->node->y, alloc_width, node->height);
 	}
 
+	// The space taken by the title and the icon
+	int title_width = con->title_bar.title_text ?
+		con->title_bar.title_text->width : 0;
+	int start;
+	if (title_align == ALIGN_RIGHT) {
+		start = width - config->titlebar_h_padding - icon_width - title_width;
+	} else if (title_align == ALIGN_CENTER) {
+		start = ((int)width - marks_buffer_width - icon_width - title_width) >> 1;
+	} else {
+		start = config->titlebar_h_padding;
+	}
+	start = MAX(start, config->titlebar_h_padding);
+	int end = width - config->titlebar_h_padding;
+
+	// Like in i3, the icon is on the right of right-aligned titles
+	int h_padding = start;
+	int icon_x;
+	if (title_align == ALIGN_RIGHT) {
+		end -= icon_width;
+		icon_x = end + config->titlebar_h_padding + icon_padding;
+	} else {
+		icon_x = start + icon_padding;
+		h_padding += icon_width;
+	}
+	container_update_title_icon(con, icon, icon_x, (height - icon_size) >> 1,
+		icon_size);
+
 	if (con->title_bar.title_text) {
 		struct sway_text_node *node = con->title_bar.title_text;
 
-		int h_padding;
-		if (title_align == ALIGN_RIGHT) {
-			h_padding = width - config->titlebar_h_padding - node->width;
-		} else if (title_align == ALIGN_CENTER) {
-			h_padding = ((int)width - marks_buffer_width - node->width) >> 1;
-		} else {
-			h_padding = config->titlebar_h_padding;
-		}
-
-		h_padding = MAX(h_padding, config->titlebar_h_padding);
-
-		int alloc_width = MIN((int) node->width,
-			width - h_padding - config->titlebar_h_padding);
+		int alloc_width = MIN((int) node->width, end - h_padding);
 		alloc_width = MAX(alloc_width, 0);
 
 		sway_text_node_set_max_width(node, alloc_width);

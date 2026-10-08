@@ -1,6 +1,7 @@
 #include <string.h>
 #include "sway/commands.h"
 #include "sway/config.h"
+#include "sway/icon.h"
 #include "sway/ipc-server.h"
 #include "sway/server.h"
 #include "sway/tree/arrange.h"
@@ -9,6 +10,9 @@
 #include "log.h"
 
 static void title_bar_update_iterator(struct sway_container *con, void *data) {
+	if (con->view) {
+		view_update_icon(con->view);
+	}
 	container_update_title_bar(con);
 }
 
@@ -46,6 +50,8 @@ static void do_reload(void *data) {
 	}
 	list_free_items_and_destroy(bar_ids);
 
+	// Pick up changes to the icon theme setting and to icons on disk
+	sway_icons_reset();
 	root_for_each_container(title_bar_update_iterator, NULL);
 
 	arrange_root();

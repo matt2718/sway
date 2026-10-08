@@ -3,6 +3,9 @@ sway_sources = files(
 	'config.c',
 	'criteria.c',
 	'decoration.c',
+	'desktop_entry.c',
+	'icon.c',
+	'icon_theme.c',
 	'ipc-json.c',
 	'ipc-server.c',
 	'lock.c',
@@ -10,6 +13,7 @@ sway_sources = files(
 	'realtime.c',
 	'scene_descriptor.c',
 	'server.c',
+	'sway_icon_node.c',
 	'sway_text_node.c',
 	'swaynag.c',
 	'xdg_activation_v1.c',
@@ -116,6 +120,8 @@ sway_sources = files(
 	'commands/tiling_drag_threshold.c',
 	'commands/title_align.c',
 	'commands/title_format.c',
+	'commands/title_window_icon.c',
+	'commands/title_window_icon_theme.c',
 	'commands/titlebar_border_thickness.c',
 	'commands/titlebar_padding.c',
 	'commands/unmark.c',
@@ -224,6 +230,7 @@ sway_deps = [
 	jsonc,
 	libevdev,
 	libinput,
+	librsvg,
 	libudev,
 	math,
 	pango,
@@ -235,6 +242,7 @@ sway_deps = [
 	xkbcommon,
 	xcb,
 	xcb_icccm,
+	xcb_ewmh,
 ]
 
 if wlroots_features['xwayland']

@@ -71,6 +71,7 @@ cairo = dependency('cairo')
 pango = dependency('pango')
 pangocairo = dependency('pangocairo')
 gdk_pixbuf = dependency('gdk-pixbuf-2.0', required: get_option('gdk-pixbuf'))
+librsvg = dependency('librsvg-2.0', version: '>=2.46', required: get_option('librsvg'))
 pixman = dependency('pixman-1')
 libevdev = dependency('libevdev')
 libinput = wlroots_features['libinput_backend'] ? dependency('libinput', version: '>=1.26.0') : null_dep
@@ -80,6 +81,7 @@ libudev = wlroots_features['libinput_backend'] ? dependency('libudev') : null_de
 math = cc.find_library('m')
 rt = cc.find_library('rt')
 xcb_icccm = wlroots_features['xwayland'] ? dependency('xcb-icccm') : null_dep
+xcb_ewmh = wlroots_features['xwayland'] ? dependency('xcb-ewmh') : null_dep
 threads = dependency('threads') # for pthread_setschedparam and pthread_atfork
 
 if get_option('sd-bus-provider') == 'auto'
@@ -106,6 +108,7 @@ have_tray = (not get_option('tray').disabled()) and tray_deps_found
 conf_data = configuration_data()
 
 conf_data.set10('HAVE_GDK_PIXBUF', gdk_pixbuf.found())
+conf_data.set10('HAVE_LIBRSVG', librsvg.found())
 conf_data.set10('HAVE_LIBSYSTEMD', sdbus.found() and sdbus.name() == 'libsystemd')
 conf_data.set10('HAVE_LIBELOGIND', sdbus.found() and sdbus.name() == 'libelogind')
 conf_data.set10('HAVE_BASU', sdbus.found() and sdbus.name() == 'basu')
@@ -243,6 +246,7 @@ subdir('completions')
 
 summary({
 	'gdk-pixbuf': gdk_pixbuf.found(),
+	'librsvg': librsvg.found(),
 	'tray': have_tray,
 	'man-pages': scdoc.found(),
 }, bool_yn: true)

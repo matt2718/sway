@@ -51,6 +51,7 @@
 #include <wlr/types/wlr_xdg_foreign_v1.h>
 #include <wlr/types/wlr_xdg_foreign_v2.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_xdg_toplevel_icon_v1.h>
 #include <wlr/types/wlr_xdg_toplevel_tag_v1.h>
 #include <xf86drm.h>
 #include "config.h"
@@ -58,6 +59,7 @@
 #include "log.h"
 #include "sway/config.h"
 #include "sway/desktop/idle_inhibit_v1.h"
+#include "sway/icon.h"
 #include "sway/input/input-manager.h"
 #include "sway/output.h"
 #include "sway/server.h"
@@ -613,6 +615,17 @@ bool server_init(struct sway_server *server) {
 	wl_signal_add(&xdg_toplevel_tag_manager_v1->events.set_tag,
 		&server->xdg_toplevel_tag_manager_v1_set_tag);
 
+	server->xdg_toplevel_icon_manager_v1 =
+		wlr_xdg_toplevel_icon_manager_v1_create(server->wl_display, 1);
+	if (!server->xdg_toplevel_icon_manager_v1) {
+		sway_log(SWAY_ERROR, "Failed to create XDG toplevel icon manager");
+		return false;
+	}
+	server->xdg_toplevel_icon_manager_v1_set_icon.notify =
+		xdg_toplevel_icon_manager_v1_handle_set_icon;
+	wl_signal_add(&server->xdg_toplevel_icon_manager_v1->events.set_icon,
+		&server->xdg_toplevel_icon_manager_v1_set_icon);
+
 	struct wlr_cursor_shape_manager_v1 *cursor_shape_manager =
 		wlr_cursor_shape_manager_v1_create(server->wl_display, 2);
 	if (!cursor_shape_manager) {
@@ -734,6 +747,7 @@ void server_fini(struct sway_server *server) {
 	wl_list_remove(&server->xdg_activation_v1_request_activate.link);
 	wl_list_remove(&server->xdg_activation_v1_new_token.link);
 	wl_list_remove(&server->xdg_toplevel_tag_manager_v1_set_tag.link);
+	wl_list_remove(&server->xdg_toplevel_icon_manager_v1_set_icon.link);
 	wl_list_remove(&server->request_set_cursor_shape.link);
 	wl_list_remove(&server->new_foreign_toplevel_capture_request.link);
 	wl_list_remove(&server->workspace_manager_v1_commit.link);
@@ -752,6 +766,7 @@ void server_fini(struct sway_server *server) {
 	wl_display_destroy(server->wl_display);
 	list_free(server->dirty_nodes);
 	free(server->socket);
+	sway_icons_reset();
 }
 
 bool server_start(struct sway_server *server) {

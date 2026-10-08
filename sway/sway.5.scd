@@ -410,6 +410,26 @@ set|plus|minus|toggle <amount>
 
 	The default format is "%title".
 
+*title_window_icon* yes|no|toggle++
+*title_window_icon* padding|toggle <px>[px]
+	Shows or hides the icon of the window in its title bar, next to the
+	title: on its left, or on its right if the title is right-aligned (see
+	*title_align*). With _padding_, the icon is shown with the given
+	horizontal padding on both sides, in pixels. _yes_ resets the padding to
+	0, while _toggle_ keeps it unless a new one is given. The icon is as tall
+	as the title font. By default, icons are not shown.
+
+	The icon is the one set by the application, with the xdg-toplevel-icon-v1
+	protocol or the \_NET_WM_ICON property of X11 windows. Otherwise, it is
+	the icon of the application's desktop entry, matched by app ID, sandbox
+	app ID or X11 class, or else the icon named after the app ID. Icons are
+	looked up in the icon theme set with *title_window_icon_theme*, and can be
+	PNG or SVG images.
+
+	This command is typically used with *for_window* criteria. For example:
+
+		for_window [all] title_window_icon padding 2px
+
 ## Config or runtime commands
 The following commands may be used either in the configuration file or at
 runtime.
@@ -896,6 +916,14 @@ The default colors are:
 	Sets the title alignment. If _right_ is selected and _show_marks_ is set
 	to _yes_, the marks will be shown on the _left_ side instead of the
 	_right_ side.
+
+*title_window_icon_theme* <name>
+	Sets the icon theme of the window icons shown in title bars (see
+	*title_window_icon*), by the name of its directory, for instance
+	_Papirus-Dark_. Icons which are not part of the theme or of the themes it
+	inherits from are looked up in the _hicolor_ theme, which is the only one
+	used by default. Icon themes and desktop entries are read again when the
+	configuration is reloaded.
 
 *unbindswitch* <switch>:<state>
 	Removes a binding for when <switch> changes to <state>.

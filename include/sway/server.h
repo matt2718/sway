@@ -121,6 +121,9 @@ struct sway_server {
 
 	struct wl_listener xdg_toplevel_tag_manager_v1_set_tag;
 
+	struct wlr_xdg_toplevel_icon_manager_v1 *xdg_toplevel_icon_manager_v1;
+	struct wl_listener xdg_toplevel_icon_manager_v1_set_icon;
+
 	struct wl_listener request_set_cursor_shape;
 
 	struct wlr_tearing_control_manager_v1 *tearing_control_v1;

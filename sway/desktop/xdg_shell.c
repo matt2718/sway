@@ -1,12 +1,19 @@
+#include <cairo.h>
+#include <drm_fourcc.h>
 #include <float.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_xdg_toplevel_icon_v1.h>
 #include <wlr/types/wlr_xdg_toplevel_tag_v1.h>
 #include <wlr/util/edges.h>
 #include "log.h"
 #include "sway/decoration.h"
+#include "sway/icon.h"
 #include "sway/scene_descriptor.h"
 #include "sway/desktop/transaction.h"
 #include "sway/input/cursor.h"
@@ -270,7 +277,84 @@ static void destroy(struct sway_view *view) {
 		return;
 	}
 	free(xdg_shell_view->tag);
+	wlr_xdg_toplevel_icon_v1_unref(xdg_shell_view->pending_icon);
 	free(xdg_shell_view);
+}
+
+static cairo_surface_t *image_from_icon_buffer(struct wlr_buffer *buffer) {
+	void *data;
+	uint32_t format;
+	size_t stride;
+	if (!wlr_buffer_begin_data_ptr_access(buffer,
+			WLR_BUFFER_DATA_PTR_ACCESS_READ, &data, &format, &stride)) {
+		return NULL;
+	}
+
+	// Both formats have premultiplied alpha, like cairo
+	cairo_surface_t *image = NULL;
+	if (format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_XRGB8888) {
+		cairo_surface_t *source = cairo_image_surface_create_for_data(data,
+			format == DRM_FORMAT_ARGB8888 ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
+			buffer->width, buffer->height, stride);
+		if (cairo_surface_status(source) == CAIRO_STATUS_SUCCESS) {
+			image = sway_icon_copy_image(source);
+		}
+		cairo_surface_destroy(source);
+	} else {
+		sway_log(SWAY_DEBUG, "Unsupported toplevel icon format 0x%08"PRIX32,
+			format);
+	}
+
+	wlr_buffer_end_data_ptr_access(buffer);
+	return image;
+}
+
+static void fetch_client_icon(struct sway_view *view) {
+	struct sway_xdg_shell_view *xdg_shell_view = xdg_shell_view_from_view(view);
+	if (!xdg_shell_view || !xdg_shell_view->icon_outdated) {
+		return;
+	}
+	xdg_shell_view->icon_outdated = false;
+
+	struct wlr_xdg_toplevel_icon_v1 *icon = xdg_shell_view->pending_icon;
+	list_t *images = NULL;
+	if (icon) {
+		// Choose which images to keep
+		int sizes[256];
+		bool keep[256];
+		size_t n = 0;
+		struct wlr_xdg_toplevel_icon_v1_buffer *icon_buffer;
+		wl_list_for_each(icon_buffer, &icon->buffers, link) {
+			if (n == sizeof(sizes) / sizeof(sizes[0])) {
+				break;
+			}
+			sizes[n++] = icon_buffer->buffer->width;
+		}
+		sway_icon_choose_images(sizes, n, keep);
+
+		images = create_list();
+		size_t i = 0;
+		wl_list_for_each(icon_buffer, &icon->buffers, link) {
+			if (i == n) {
+				break;
+			}
+			if (keep[i++]) {
+				cairo_surface_t *image =
+					image_from_icon_buffer(icon_buffer->buffer);
+				if (image) {
+					list_add(images, image);
+				}
+			}
+		}
+		sway_log(SWAY_DEBUG, "Toplevel icon of view %p: '%s', %d of %zu images",
+			view, icon->name ? icon->name : "", images->length, n);
+	}
+
+	view_set_client_icon(view, icon ? icon->name : NULL, images);
+
+	// The client's buffers aren't needed anymore
+	wlr_xdg_toplevel_icon_v1_unref(icon);
+	xdg_shell_view->pending_icon = NULL;
 }
 
 static const struct sway_view_impl view_impl = {
@@ -286,6 +370,7 @@ static const struct sway_view_impl view_impl = {
 	.close = _close,
 	.close_popups = close_popups,
 	.destroy = destroy,
+	.fetch_client_icon = fetch_client_icon,
 };
 
 static void handle_commit(struct wl_listener *listener, void *data) {
@@ -590,6 +675,26 @@ void handle_xdg_shell_toplevel(struct wl_listener *listener, void *data) {
 		wlr_scene_xdg_surface_create(&xdg_shell_view->view.image_capture_scene->tree, xdg_toplevel->base);
 
 	xdg_toplevel->base->data = xdg_shell_view;
+}
+
+void xdg_toplevel_icon_manager_v1_handle_set_icon(struct wl_listener *listener,
+		void *data) {
+	const struct wlr_xdg_toplevel_icon_manager_v1_set_icon_event *event = data;
+	// The toplevel may be inert
+	struct sway_view *view = event->toplevel ?
+		view_from_wlr_xdg_surface(event->toplevel->base) : NULL;
+	struct sway_xdg_shell_view *xdg_shell_view =
+		view ? xdg_shell_view_from_view(view) : NULL;
+	if (!xdg_shell_view) {
+		return;
+	}
+
+	// Only keep a reference for now: the images are read if the icon is shown
+	wlr_xdg_toplevel_icon_v1_unref(xdg_shell_view->pending_icon);
+	xdg_shell_view->pending_icon =
+		event->icon ? wlr_xdg_toplevel_icon_v1_ref(event->icon) : NULL;
+	xdg_shell_view->icon_outdated = true;
+	view_update_icon(view);
 }
 
 void xdg_toplevel_tag_manager_v1_handle_set_tag(struct wl_listener *listener, void *data) {
